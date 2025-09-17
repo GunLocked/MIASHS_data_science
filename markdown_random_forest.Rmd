@@ -1,0 +1,135 @@
+---
+title: "Datascience_demijournee"
+author: "romanet"
+date: "2025-09-17"
+output: pdf_document
+---
+
+```{r setup}
+#install.packages("randomForest")
+#install.packages("caret")
+library(pROC)
+library(ggplot2)
+library(randomForest)
+library(caret)
+library(corrplot)
+setwd("~/MASTER/MASTER 1/classification/data science eval")
+data_train<-read.table("farms_train.csv", header=TRUE, sep = ",")
+
+```
+#ACP
+
+```{r }
+head(data_train)
+summary(data_train)
+```
+
+```{r }
+#je teste sur mon jeu de données train
+set.seed(123)  # pour reproductibilité
+trainIndex <- createDataPartition(data_train$DIFF, p = 0.3, list = FALSE)
+train <- data_train[trainIndex, ]
+test <- data_train[-trainIndex, ]
+# Vérifier que la variable cible est bien un facteur (important pour la classification)
+train$DIFF <- as.factor(train$DIFF)
+test$DIFF <- as.factor(test$DIFF)
+```
+
+```{r}
+set.seed(123)
+rf_model <- randomForest(DIFF ~ .,
+                         data = train,
+                         ntree = 500,
+                         mtry = 4,
+                         maxnodes = 5, #meilleur resultat avec 5
+                         importance = TRUE,
+                         )
+
+print(rf_model)
+```
+
+```{r}
+# Prédictions sur le jeu de test
+pred <- predict(rf_model, newdata = test)
+
+# Matrice de confusion + métriques
+conf_matrix <- confusionMatrix(pred, test$DIFF)
+
+# Affichage complet de la matrice de confusion
+conf_matrix
+
+# Affichage de l'accuracy globale
+conf_matrix$overall["Accuracy"]
+
+# Affichage de la sensibilité et spécificité (compatible binaire & multiclasses)
+if (is.matrix(conf_matrix$byClass)) {
+  # Cas multiclasses
+  conf_matrix$byClass[, c("Sensitivity", "Specificity")]
+} else {
+  # Cas binaire (vecteur nommé)
+  conf_matrix$byClass[c("Sensitivity", "Specificity")]
+}
+
+```
+
+```{r}
+# Extraire la matrice brute
+cm_table <- as.table(conf_matrix$table)
+
+# Convertir en data frame pour ggplot
+cm_df <- as.data.frame(cm_table)
+colnames(cm_df) <- c("Réel", "Prédit", "Freq")
+
+# Heatmap
+ggplot(data = cm_df, aes(x = Réel, y = Prédit, fill = Freq)) +
+  geom_tile() +
+  geom_text(aes(label = Freq), color = "white", size = 5) +
+  scale_fill_gradient(low = "lightblue", high = "darkblue") +
+  labs(title = "Matrice de confusion (Random Forest)", x = "Réel", y = "Prédit") +
+  theme_minimal()
+```
+
+```{r}
+# Importance des variables
+varImpPlot(rf_model)
+#R32 a beaucoup trop de poids R2 sensiblement pareil
+```
+```{r}
+set.seed(123)
+
+# Validation croisée 5-fold
+ctrl <- trainControl(method = "cv", number = 5, search = "grid")
+
+# Grille de paramètres
+tunegrid <- expand.grid(mtry = c(2, 3, 4, 5))  # nombre de variables testées par split
+
+# Entraînement avec Random Forest et CV
+rf_cv <- train(DIFF ~ ., 
+               data = train, 
+               method = "rf", 
+               metric = "Accuracy",
+               tuneGrid = tunegrid,
+               trControl = ctrl,
+               ntree = 500)  # tu peux augmenter à 1000 si le temps le permet
+
+# Résultats
+print(rf_cv)
+plot(rf_cv)  # Visualisation mtry vs Accuracy
+```
+```{r}
+# Suppression éventuelle de R32 avant de prédire
+# train <- train[, !names(train) %in% c("R32")]
+# test <- test[, !names(test) %in% c("R32")]
+
+# Prédiction des probabilités
+pred_prob <- predict(rf_model, newdata = test, type = "prob")
+
+# Pour la classe positive (ex. "1" ou le niveau d'intérêt)
+# Ici, on prend la première colonne si binaire
+roc_obj <- roc(test$DIFF, pred_prob[,1])
+plot(roc_obj, col = "blue", lwd = 2, main = "Courbe ROC - Random Forest")
+auc(roc_obj)  # Affiche l'AUC
+
+
+```
+
