@@ -25,11 +25,12 @@ summary(data_train)
 ```
 
 ```{r }
-#je teste sur mon jeu de données train
-set.seed(123)  # pour reproductibilité
+#suppression R32 ça aide pas
+# Séparation train/test (30% train)
+set.seed(123)
 trainIndex <- createDataPartition(data_train$DIFF, p = 0.3, list = FALSE)
 train <- data_train[trainIndex, ]
-test <- data_train[-trainIndex, ]
+test  <- data_train[-trainIndex, ]
 # Vérifier que la variable cible est bien un facteur (important pour la classification)
 train$DIFF <- as.factor(train$DIFF)
 test$DIFF <- as.factor(test$DIFF)
@@ -41,7 +42,6 @@ rf_model <- randomForest(DIFF ~ .,
                          data = train,
                          ntree = 500,
                          mtry = 4,
-                         maxnodes = 5, #meilleur resultat avec 5
                          importance = TRUE,
                          )
 
@@ -117,9 +117,6 @@ print(rf_cv)
 plot(rf_cv)  # Visualisation mtry vs Accuracy
 ```
 ```{r}
-# Suppression éventuelle de R32 avant de prédire
-# train <- train[, !names(train) %in% c("R32")]
-# test <- test[, !names(test) %in% c("R32")]
 
 # Prédiction des probabilités
 pred_prob <- predict(rf_model, newdata = test, type = "prob")
