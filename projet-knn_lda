@@ -1,0 +1,224 @@
+path.train <-"/Users/louisonvaugoyeau/Desktop/MIASHS - MTP/COURS/Machine learning/kaggle projet/farms_train.csv"
+train.set <- read.csv(path.train)
+path.test <-"/Users/louisonvaugoyeau/Desktop/MIASHS - MTP/COURS/Machine learning/kaggle projet/farms_test.csv"
+test.set <- read.csv(path.train)
+
+summary(train.set)
+library(FactoMineR)
+cor.mat <- cor(train.set[sapply(train.set, is.numeric)], use = "pairwise.complete.obs")
+corrplot(cor.mat, method = "color", type = "upper", tl.cex = 0.7)
+res.acp <- PCA(train.set)
+
+library(MASS)
+
+train.set$DIFF <- as.factor(train.set$DIFF)
+
+lda.model <- lda(DIFF ~ ., data = train.set)
+
+lda.model
+
+lda.pred <- predict(lda.model, newdata = test.set)
+
+table(Observed = test.set$DIFF, Predicted = lda.pred$class)
+
+mean(lda.pred$class == test.set$DIFF)
+
+
+
+
+
+
+
+
+
+library(MASS)
+library(caret)
+library(ggplot2)
+library(reshape2)
+
+set.seed(123)
+
+# Variable cible en facteur
+# Préparer la cible
+train.set$DIFF <- as.factor(train.set$DIFF)
+
+# k-fold
+k <- 10
+folds <- createFolds(train.set$DIFF, k = k, list = TRUE, returnTrain = FALSE)
+
+# Stockage résultats
+err_global <- numeric(k)
+auc_values <- numeric(k)
+
+# Boucle CV
+for (i in 1:k) {
+  test.idx <- folds[[i]]
+  data.train <- train.set[-test.idx, ]
+  data.test  <- train.set[test.idx, ]
+  
+  # LDA
+  lda.model <- lda(DIFF ~ R17+R32+R2, data = data.train)
+  pred <- predict(lda.model, data.test)
+  
+  # Erreur globale
+  err_global[i] <- mean(pred$class != data.test$DIFF)
+  
+  # AUC (probabilités pour la classe "1")
+  probs <- pred$posterior[,2]
+  roc.obj <- roc(response = data.test$DIFF,
+                 predictor = probs,
+                 levels = rev(levels(data.test$DIFF)))
+  auc_values[i] <- auc(roc.obj)
+}
+
+# ---- Résultats numériques ----
+cat("Taux d'erreur moyen :", mean(err_global), "\n")
+cat("AUC moyen :", mean(auc_values), "\n")
+
+# On prend les coefficients de la LDA sur toutes les données
+lda.full <- lda(DIFF ~ R17+R32+R2, data = train.set)
+var_importance <- abs(lda.full$scaling[,1])
+var_importance <- sort(var_importance, decreasing = TRUE)
+
+# Barplot importance
+barplot(var_importance,
+        las = 2, col = "steelblue",
+        main = "Importance des variables (LDA)",
+        ylab = "|Coefficient discriminant|")
+
+boxplot(auc_values, col = "lightgreen",
+        main = paste(k, "-fold Cross-Validation : AUC"),
+        ylab = "AUC")
+
+
+
+
+
+
+
+
+train.set$DIFF <- as.factor(train.set$DIFF)
+
+lda.model <- lda(DIFF ~ ., data = train.set)
+
+lda.pred <- predict(lda.model, train.set)
+probs <- lda.pred$posterior[,2]
+roc.obj <- roc(train.set$DIFF, probs)
+
+plot(roc.obj, col = "blue", lwd = 2, main = "Courbe ROC - LDA")
+abline(a = 0, b = 1, lty = 2, col = "red")
+
+# AUC
+auc(roc.obj)
+
+
+install.packages("combinat")
+library(class)
+library(caret)
+library(pROC)
+library(utils)
+library(combinat)
+
+set.seed(10)
+
+features <- c("R2","R7","R8","R17","R22","R32")
+target <- "DIFF"
+k_max <- 20
+n_splits <- 5
+
+all_combinations <- unlist(lapply(1:length(features), function(x) combn(features, x, simplify = FALSE)), recursive = FALSE)
+
+best_auc <- 0
+best_k <- 0
+best_features <- NULL
+
+for (vars in all_combinations) {
+  for (k in 1:k_max) {
+    aucs_split <- c()
+    
+    for (s in 1:n_splits) {
+      Index <- createDataPartition(train.set[[target]], p = 0.7, list = FALSE)
+      data_train <- train.set[Index, ]
+      data_test <- train.set[-Index, ]
+      
+      x_train <- data_train[, vars, drop = FALSE]
+      y_train <- data_train[[target]]
+      x_test <- data_test[, vars, drop = FALSE]
+      y_test <- data_test[[target]]
+      
+      preProc <- preProcess(x_train, method = c("center", "scale"))
+      x_train_scaled <- predict(preProc, x_train)
+      x_test_scaled <- predict(preProc, x_test)
+      
+      knn_pred <- knn(train = x_train_scaled, test = x_test_scaled, cl = y_train, k = k, prob = TRUE)
+      probs <- attr(knn_pred, "prob")
+      probs <- ifelse(knn_pred == "1", probs, 1 - probs)
+      
+      aucs_split <- c(aucs_split, roc(y_test, probs)$auc)
+    }
+    
+    mean_auc <- mean(aucs_split)
+    
+    if (mean_auc > best_auc) {
+      best_auc <- mean_auc
+      best_k <- k
+      best_features <- vars
+    }
+  }
+}
+
+# Évaluation finale avec le modèle qui maximise l'AUC
+Index <- createDataPartition(train.set[[target]], p = 0.7, list = FALSE)
+data_train <- train.set[Index, ]
+data_test <- train.set[-Index, ]
+
+x_train <- data_train[, best_features, drop = FALSE]
+y_train <- data_train[[target]]
+x_test <- data_test[, best_features, drop = FALSE]
+y_test <- data_test[[target]]
+
+preProc <- preProcess(x_train, method = c("center", "scale"))
+x_train_scaled <- predict(preProc, x_train)
+x_test_scaled <- predict(preProc, x_test)
+
+knn_pred <- knn(train = x_train_scaled, test = x_test_scaled, cl = y_train, k = best_k, prob = TRUE)
+probs <- attr(knn_pred, "prob")
+probs <- ifelse(knn_pred == "1", probs, 1 - probs)
+
+roc_obj <- roc(y_test, probs)
+plot(roc_obj, col = "blue", main = paste("ROC curve - AUC =", round(roc_obj$auc, 3)))
+
+cat("Variables utilisées :", paste(best_features, collapse = ", "), "\n")
+cat("K utilisé :", best_k, "\n")
+cat("AUC finale :", round(roc_obj$auc, 3), "\n")
+knn_pred <- knn(train = x_train_scaled, test = x_test_scaled, cl = y_train, k = best_k, prob = TRUE)
+probs <- attr(knn_pred, "prob")
+probs <- ifelse(knn_pred == "1", probs, 1 - probs)
+
+roc_obj <- roc(y_test, probs)
+plot(roc_obj, col = "blue", main = paste("Courbe ROC - AUC =", round(roc_obj$auc, 3)))
+
+
+# Partition aléatoire pour le test
+Index <- createDataPartition(train.set[[target]], p = 0.7, list = FALSE)
+data_train <- train.set[Index, ]
+data_test <- train.set[-Index, ]
+
+x_train <- data_train[, best_features, drop = FALSE]
+y_train <- data_train[[target]]
+x_test <- data_test[, best_features, drop = FALSE]
+y_test <- data_test[[target]]
+
+preProc <- preProcess(x_train, method = c("center", "scale"))
+x_train_scaled <- predict(preProc, x_train)
+x_test_scaled <- predict(preProc, x_test)
+
+knn_pred <- knn(train = x_train_scaled, test = x_test_scaled, cl = y_train, k = best_k)
+
+conf_matrix <- table(Predicted = knn_pred, Actual = y_test)
+print(conf_matrix)
+
+
+var(train.set)
+
+
